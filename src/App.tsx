@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from "react";
-import { DataTable } from "primereact/datatable";
+import { useEffect, useState } from "react";
+import { DataTable, type DataTablePageEvent } from "primereact/datatable";
 import { Column } from "primereact/column";
 
 import { fetchArtworks } from "./services/api";
@@ -10,7 +10,7 @@ function App() {
   const [loading, setLoading] = useState<boolean>(false);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalRecords, setTotalRecords] = useState<number>(0);
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [selectedArtworks, setSelectedArtworks] = useState<Artwork[]>([]);
   const [rowsToSelect, setRowsToSelect] = useState<number>(0);
 
   const rowsPerPage = 12;
@@ -24,7 +24,7 @@ function App() {
         setArtworks(response.data);
         setTotalRecords(response.pagination.total);
       } catch (error) {
-        console.error(error);
+        console.error("Error fetching artworks:", error);
       } finally {
         setLoading(false);
       }
@@ -34,25 +34,34 @@ function App() {
   }, [currentPage]);
 
 
-  const selectedRows = useMemo(() => {
-    return artworks.filter((row) => selectedIds.has(row.id));
-  }, [artworks, selectedIds]);
-
-
-  const handleSelectRows = () => {
+  const handleSelectRows = async () => {
     if (!rowsToSelect || rowsToSelect <= 0) return;
 
-    setSelectedIds((prev) => {
-      const updated = new Set(prev);
+    setSelectedArtworks([]); 
+    
 
-      const limit = Math.min(rowsToSelect, totalRecords);
-
-      for (let i = 1; i <= limit; i++) {
-        updated.add(i);
+    const totalPagesNeeded = Math.ceil(rowsToSelect / rowsPerPage);
+    let allSelectedArtworks: Artwork[] = [];
+    
+    try {
+      setLoading(true);
+      
+      // Fetch data from multiple pages if needed
+      for (let page = 1; page <= totalPagesNeeded; page++) {
+        const response = await fetchArtworks(page);
+        const remainingToSelect = rowsToSelect - allSelectedArtworks.length;
+        const artworksToAdd = response.data.slice(0, remainingToSelect);
+        allSelectedArtworks = [...allSelectedArtworks, ...artworksToAdd];
+        
+        if (allSelectedArtworks.length >= rowsToSelect) break;
       }
-
-      return updated;
-    });
+      
+      setSelectedArtworks(allSelectedArtworks);
+    } catch (error) {
+      console.error("Error fetching artworks for selection:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -65,16 +74,24 @@ function App() {
           value={rowsToSelect}
           onChange={(e) => setRowsToSelect(Number(e.target.value))}
           placeholder="Enter number of rows"
+          min="1"
+          max={totalRecords}
         />
-        <button onClick={handleSelectRows}>
+
+        <button onClick={handleSelectRows} style={{ marginLeft: "0.5rem" }}>
           Select Rows
         </button>
+
         <button
-          style={{ marginLeft: "1rem" }}
-          onClick={() => setSelectedIds(new Set())}
+          onClick={() => setSelectedArtworks([])}
+          style={{ marginLeft: "0.5rem" }}
         >
           Clear Selection
         </button>
+        
+        <span style={{ marginLeft: "1rem" }}>
+          Selected: {selectedArtworks.length} rows
+        </span>
       </div>
 
       <DataTable
@@ -85,30 +102,15 @@ function App() {
         rows={rowsPerPage}
         totalRecords={totalRecords}
         first={(currentPage - 1) * rowsPerPage}
-        onPage={(event) => {
+        onPage={(event: DataTablePageEvent) => {
           const pageIndex = event.page ?? 0;
           setCurrentPage(pageIndex + 1);
         }}
-        selection={selectedRows}
+        selection={selectedArtworks}
         onSelectionChange={(e) => {
-          const selectedRows = e.value as unknown as Artwork[];
-
-          setSelectedIds((prev) => {
-            const updated = new Set(prev);
-
-            // Remove current page IDs
-            artworks.forEach((row) => {
-              updated.delete(row.id);
-            });
-
-            // Add newly selected rows
-            selectedRows.forEach((row) => {
-              updated.add(row.id);
-            });
-
-            return updated;
-          });
+          setSelectedArtworks(e.value as Artwork[]);
         }}
+        selectionMode="multiple" // Move selectionMode here instead of Column
         dataKey="id"
         tableStyle={{ minWidth: "60rem" }}
       >
